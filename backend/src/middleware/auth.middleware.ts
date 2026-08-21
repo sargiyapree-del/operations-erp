@@ -1,4 +1,5 @@
-import type { NextFunction, Request, Response } from 'express';
+import type { UserRole } from '@prisma/client';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
 import { InvalidTokenError, type AuthenticatedUser, verifyAccessToken } from '../utils/jwt.js';
 
@@ -31,3 +32,18 @@ export const requireAuthentication = (request: Request, response: Response, next
     next(error);
   }
 };
+
+export const requireRoles = (...allowedRoles: UserRole[]): RequestHandler =>
+  (request, response, next): void => {
+    if (!request.auth) {
+      response.status(401).json({ message: 'Authentication is required.' });
+      return;
+    }
+
+    if (!allowedRoles.includes(request.auth.role)) {
+      response.status(403).json({ message: 'You are not authorized to access this resource.' });
+      return;
+    }
+
+    next();
+  };

@@ -4,7 +4,8 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum UserRole {
@@ -122,6 +123,7 @@ model Warehouse {
   sourceTransfers      StockTransfer[]    @relation("TransferSourceWarehouse")
   destinationTransfers StockTransfer[]    @relation("TransferDestinationWarehouse")
   workOrders           WorkOrder[]
+  salesOrders          SalesOrder[]
 
   @@index([isActive])
 }
@@ -292,6 +294,7 @@ model SalesOrder {
   id          String           @id @default(cuid())
   orderNumber String           @unique
   customerId  String
+  warehouseId String
   status      SalesOrderStatus @default(DRAFT)
   orderDate   DateTime         @default(now())
   fulfilledAt DateTime?
@@ -299,12 +302,15 @@ model SalesOrder {
   createdById String
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
-  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  createdBy   User             @relation("SalesOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  lines       SalesOrderLine[]
-  movements   StockMovement[]  @relation("SalesOrderMovements")
+
+  customer  Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  warehouse Warehouse        @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdBy User             @relation("SalesOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  lines     SalesOrderLine[]
+  movements StockMovement[]  @relation("SalesOrderMovements")
 
   @@index([status, customerId])
+  @@index([warehouseId])
 }
 
 model SalesOrderLine {
@@ -339,3 +345,5 @@ model AuditLog {
   @@index([entityType, entityId, createdAt])
   @@index([actorUserId, createdAt])
 }
+
+
