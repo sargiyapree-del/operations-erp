@@ -6,3 +6,336 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+enum UserRole {
+  ADMIN
+  OPERATIONS_MANAGER
+  WAREHOUSE_OPERATOR
+  SALES_USER
+}
+
+enum StockMovementType {
+  OPENING_BALANCE
+  STOCK_RECEIPT
+  STOCK_ADJUSTMENT_IN
+  STOCK_ADJUSTMENT_OUT
+  TRANSFER_DISPATCH
+  TRANSFER_RECEIPT
+  WORK_ORDER_CONSUMPTION
+  WORK_ORDER_OUTPUT
+  SALES_ORDER_FULFILMENT
+}
+
+enum StockTransferStatus {
+  DRAFT
+  DISPATCHED
+  RECEIVED
+  CANCELLED
+}
+
+enum WorkOrderStatus {
+  DRAFT
+  RELEASED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum SalesOrderStatus {
+  DRAFT
+  CONFIRMED
+  PARTIALLY_FULFILLED
+  FULFILLED
+  CANCELLED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  STATUS_CHANGE
+  STOCK_MOVEMENT
+  CANCEL
+  LOGIN
+}
+
+model User {
+  id                  String          @id @default(cuid())
+  email               String          @unique
+  passwordHash        String
+  fullName            String
+  role                UserRole        @default(WAREHOUSE_OPERATOR)
+  isActive            Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  stockMovements      StockMovement[] @relation("StockMovementCreatedBy")
+  auditLogs           AuditLog[]
+  createdTransfers    StockTransfer[] @relation("TransferCreatedBy")
+  dispatchedTransfers StockTransfer[] @relation("TransferDispatchedBy")
+  receivedTransfers   StockTransfer[] @relation("TransferReceivedBy")
+  createdWorkOrders   WorkOrder[]     @relation("WorkOrderCreatedBy")
+  createdSalesOrders  SalesOrder[]    @relation("SalesOrderCreatedBy")
+
+  @@index([role, isActive])
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+}
+
+model Product {
+  id                 String              @id @default(cuid())
+  sku                String              @unique
+  name               String
+  description        String?
+  categoryId         String
+  unitOfMeasure      String              @default("EA")
+  reorderLevel       Decimal?            @db.Decimal(18, 4)
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  inventoryBalances  InventoryBalance[]
+  stockMovements     StockMovement[]
+  transferLines      StockTransferLine[]
+  workOrderMaterials WorkOrderMaterial[]
+  workOrderOutputs   WorkOrderOutput[]
+  salesOrderLines    SalesOrderLine[]
+
+  @@index([categoryId, isActive])
+}
+
+model Warehouse {
+  id                   String             @id @default(cuid())
+  code                 String             @unique
+  name                 String
+  address              String?
+  isActive             Boolean            @default(true)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  inventoryBalances    InventoryBalance[]
+  stockMovements       StockMovement[]
+  sourceTransfers      StockTransfer[]    @relation("TransferSourceWarehouse")
+  destinationTransfers StockTransfer[]    @relation("TransferDestinationWarehouse")
+  workOrders           WorkOrder[]
+
+  @@index([isActive])
+}
+
+model InventoryBalance {
+  id             String    @id @default(cuid())
+  warehouseId    String
+  productId      String
+  quantityOnHand Decimal   @default(0) @db.Decimal(18, 4)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  warehouse      Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  product        Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([warehouseId, productId])
+  @@index([productId])
+}
+
+model StockMovement {
+  id                  String             @id @default(cuid())
+  warehouseId         String
+  productId           String
+  movementType        StockMovementType
+  quantityChange      Decimal            @db.Decimal(18, 4)
+  occurredAt          DateTime           @default(now())
+  reference           String?
+  notes               String?
+  createdById         String
+  stockTransferId     String?
+  stockTransferLineId String?
+  workOrderId         String?
+  workOrderMaterialId String?
+  workOrderOutputId   String?
+  salesOrderId        String?
+  salesOrderLineId    String?
+  createdAt           DateTime           @default(now())
+  warehouse           Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  product             Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdBy           User               @relation("StockMovementCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  stockTransfer       StockTransfer?     @relation("StockTransferMovements", fields: [stockTransferId], references: [id], onDelete: Restrict)
+  stockTransferLine   StockTransferLine? @relation(fields: [stockTransferLineId], references: [id], onDelete: Restrict)
+  workOrder           WorkOrder?         @relation("WorkOrderMovements", fields: [workOrderId], references: [id], onDelete: Restrict)
+  workOrderMaterial   WorkOrderMaterial? @relation(fields: [workOrderMaterialId], references: [id], onDelete: Restrict)
+  workOrderOutput     WorkOrderOutput?   @relation(fields: [workOrderOutputId], references: [id], onDelete: Restrict)
+  salesOrder          SalesOrder?        @relation("SalesOrderMovements", fields: [salesOrderId], references: [id], onDelete: Restrict)
+  salesOrderLine      SalesOrderLine?    @relation(fields: [salesOrderLineId], references: [id], onDelete: Restrict)
+
+  @@index([warehouseId, productId, occurredAt])
+  @@index([movementType, occurredAt])
+  @@index([stockTransferId])
+  @@index([workOrderId])
+  @@index([salesOrderId])
+}
+
+model StockTransfer {
+  id                     String              @id @default(cuid())
+  transferNumber         String              @unique
+  sourceWarehouseId      String
+  destinationWarehouseId String
+  status                 StockTransferStatus @default(DRAFT)
+  notes                  String?
+  createdById            String
+  dispatchedById         String?
+  receivedById           String?
+  dispatchedAt           DateTime?
+  receivedAt             DateTime?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  sourceWarehouse        Warehouse           @relation("TransferSourceWarehouse", fields: [sourceWarehouseId], references: [id], onDelete: Restrict)
+  destinationWarehouse   Warehouse           @relation("TransferDestinationWarehouse", fields: [destinationWarehouseId], references: [id], onDelete: Restrict)
+  createdBy              User                @relation("TransferCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  dispatchedBy           User?               @relation("TransferDispatchedBy", fields: [dispatchedById], references: [id], onDelete: Restrict)
+  receivedBy             User?               @relation("TransferReceivedBy", fields: [receivedById], references: [id], onDelete: Restrict)
+  lines                  StockTransferLine[]
+  movements              StockMovement[]     @relation("StockTransferMovements")
+
+  @@index([status, sourceWarehouseId])
+  @@index([destinationWarehouseId])
+}
+
+model StockTransferLine {
+  id                 String          @id @default(cuid())
+  stockTransferId    String
+  productId          String
+  quantityRequested  Decimal         @db.Decimal(18, 4)
+  quantityDispatched Decimal         @default(0) @db.Decimal(18, 4)
+  quantityReceived   Decimal         @default(0) @db.Decimal(18, 4)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  stockTransfer      StockTransfer   @relation(fields: [stockTransferId], references: [id], onDelete: Restrict)
+  product            Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  stockMovements     StockMovement[]
+
+  @@unique([stockTransferId, productId])
+  @@index([productId])
+}
+
+model WorkOrder {
+  id              String              @id @default(cuid())
+  workOrderNumber String              @unique
+  warehouseId     String
+  status          WorkOrderStatus     @default(DRAFT)
+  scheduledDate   DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  notes           String?
+  createdById     String
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  warehouse       Warehouse           @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  createdBy       User                @relation("WorkOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  materials       WorkOrderMaterial[]
+  outputs         WorkOrderOutput[]
+  movements       StockMovement[]     @relation("WorkOrderMovements")
+
+  @@index([status, warehouseId])
+}
+
+model WorkOrderMaterial {
+  id               String          @id @default(cuid())
+  workOrderId      String
+  productId        String
+  quantityRequired Decimal         @db.Decimal(18, 4)
+  quantityConsumed Decimal         @default(0) @db.Decimal(18, 4)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  workOrder        WorkOrder       @relation(fields: [workOrderId], references: [id], onDelete: Restrict)
+  product          Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  stockMovements   StockMovement[]
+
+  @@unique([workOrderId, productId])
+  @@index([productId])
+}
+
+model WorkOrderOutput {
+  id               String          @id @default(cuid())
+  workOrderId      String
+  productId        String
+  quantityPlanned  Decimal         @db.Decimal(18, 4)
+  quantityProduced Decimal         @default(0) @db.Decimal(18, 4)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  workOrder        WorkOrder       @relation(fields: [workOrderId], references: [id], onDelete: Restrict)
+  product          Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  stockMovements   StockMovement[]
+
+  @@unique([workOrderId, productId])
+  @@index([productId])
+}
+
+model Customer {
+  id              String       @id @default(cuid())
+  customerCode    String       @unique
+  name            String
+  email           String?
+  phone           String?
+  billingAddress  String?
+  shippingAddress String?
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  salesOrders     SalesOrder[]
+
+  @@index([isActive])
+}
+
+model SalesOrder {
+  id          String           @id @default(cuid())
+  orderNumber String           @unique
+  customerId  String
+  status      SalesOrderStatus @default(DRAFT)
+  orderDate   DateTime         @default(now())
+  fulfilledAt DateTime?
+  notes       String?
+  createdById String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy   User             @relation("SalesOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  lines       SalesOrderLine[]
+  movements   StockMovement[]  @relation("SalesOrderMovements")
+
+  @@index([status, customerId])
+}
+
+model SalesOrderLine {
+  id                String          @id @default(cuid())
+  salesOrderId      String
+  productId         String
+  quantityOrdered   Decimal         @db.Decimal(18, 4)
+  quantityFulfilled Decimal         @default(0) @db.Decimal(18, 4)
+  unitPrice         Decimal         @db.Decimal(18, 4)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  salesOrder        SalesOrder      @relation(fields: [salesOrderId], references: [id], onDelete: Restrict)
+  product           Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  stockMovements    StockMovement[]
+
+  @@unique([salesOrderId, productId])
+  @@index([productId])
+}
+
+model AuditLog {
+  id          String      @id @default(cuid())
+  actorUserId String
+  action      AuditAction
+  entityType  String
+  entityId    String
+  before      Json?
+  after       Json?
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+  actor       User        @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+}
