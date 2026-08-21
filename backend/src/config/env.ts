@@ -10,8 +10,20 @@ const parsePort = (value: string | undefined): number => {
   return port;
 };
 
+const requireEnvironmentValue = (name: string): string => {
+  const value = process.env[name]?.trim();
+
+  if (!value) {
+    throw new Error(`${name} must be set.`);
+  }
+
+  return value;
+};
+
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? 'development',
   port: parsePort(process.env.PORT),
   corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+  jwtSecret: requireEnvironmentValue('JWT_SECRET'),
+  jwtExpiresIn: requireEnvironmentValue('JWT_EXPIRES_IN'),
 };
