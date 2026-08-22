@@ -9,8 +9,12 @@ import {
 import { requireAuthentication, requireRoles } from '../middleware/auth.middleware.js';
 
 export const warehouseRouter = Router();
-
-const warehouseViewRoles = ['ADMIN', 'OPERATIONS_MANAGER', 'WAREHOUSE_OPERATOR'] as const;
+const warehouseViewRoles = [
+  'ADMIN',
+  'OPERATIONS_MANAGER',
+  'WAREHOUSE_OPERATOR',
+  'SALES_USER',
+] as const;
 const warehouseManageRoles = ['ADMIN', 'OPERATIONS_MANAGER'] as const;
 
 warehouseRouter.use(requireAuthentication);
