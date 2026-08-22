@@ -669,7 +669,50 @@ export const confirmSalesOrder = async (
           409,
         );
       }
+for (const line of order.lines) {
+  const inventory = await transaction.inventoryBalance.findUnique({
+    where: {
+      warehouseId_productId: {
+        warehouseId: order.warehouseId,
+        productId: line.productId,
+      },
+    },
+  });
 
+  if (!inventory) {
+    throw new SalesOrderServiceError(
+      `No inventory record found for product ${line.productId}.`,
+      409,
+    );
+  }
+
+  const availableQuantity = inventory.quantityOnHand.minus(
+    inventory.reservedQuantity,
+  );
+
+  if (availableQuantity.lt(line.quantityOrdered)) {
+    throw new SalesOrderServiceError(
+      `Insufficient available stock for product ${line.productId}. Available: ${availableQuantity.toString()}, required: ${line.quantityOrdered.toString()}.`,
+      409,
+    );
+  }
+}
+
+for (const line of order.lines) {
+  await transaction.inventoryBalance.update({
+    where: {
+      warehouseId_productId: {
+        warehouseId: order.warehouseId,
+        productId: line.productId,
+      },
+    },
+    data: {
+      reservedQuantity: {
+        increment: line.quantityOrdered,
+      },
+    },
+  });
+}
       return transaction.salesOrder.update({
         where: {
           id: orderId,
@@ -689,25 +732,21 @@ export const fulfillSalesOrder = async (
   id: unknown,
   createdById: string,
 ) => {
-  const orderId =
-    normalizeRequiredString(
-      id,
-      'Sales order id',
-    );
+  const orderId = normalizeRequiredString(
+    id,
+    'Sales order id',
+  );
 
   return prisma.$transaction(
     async (transaction) => {
-      const order =
-        await transaction.salesOrder.findUnique(
-          {
-            where: {
-              id: orderId,
-            },
-            include: {
-              lines: true,
-            },
-          },
-        );
+      const order = await transaction.salesOrder.findUnique({
+        where: {
+          id: orderId,
+        },
+        include: {
+          lines: true,
+        },
+      });
 
       if (!order) {
         throw new SalesOrderServiceError(
@@ -718,8 +757,7 @@ export const fulfillSalesOrder = async (
 
       if (
         order.status !== 'CONFIRMED' &&
-        order.status !==
-          'PARTIALLY_FULFILLED'
+        order.status !== 'PARTIALLY_FULFILLED'
       ) {
         throw new SalesOrderServiceError(
           'Only confirmed or partially fulfilled sales orders can be fulfilled.',
@@ -747,12 +785,113 @@ export const fulfillSalesOrder = async (
       );
 
       /*
-       * Stock deduction / stock movement logic
-       * should be implemented here.
-       *
-       * For now we safely mark the order as
-       * fulfilled only after a warehouse exists.
+       * Validate stock for every order line first.
+       * This prevents a partial transaction where one product
+       * gets deducted before another product fails.
        */
+      for (const line of order.lines) {
+        const inventory =
+          await transaction.inventoryBalance.findUnique({
+            where: {
+              warehouseId_productId: {
+                warehouseId: order.warehouseId,
+                productId: line.productId,
+              },
+            },
+          });
+
+        if (!inventory) {
+          throw new SalesOrderServiceError(
+            `No inventory record found for product ${line.productId}.`,
+            409,
+          );
+        }
+
+        const quantityToFulfill =
+          line.quantityOrdered.minus(line.quantityFulfilled);
+
+        if (quantityToFulfill.lte(0)) {
+          continue;
+        }
+
+        if (
+          inventory.quantityOnHand.lt(quantityToFulfill)
+        ) {
+          throw new SalesOrderServiceError(
+            `Insufficient stock for product ${line.productId}. Available: ${inventory.quantityOnHand.toString()}, required: ${quantityToFulfill.toString()}.`,
+            409,
+          );
+        }
+      }
+
+      /*
+       * Stock is available for every line.
+       * Now deduct stock and create stock movements.
+       */
+      for (const line of order.lines) {
+        const quantityToFulfill =
+          line.quantityOrdered.minus(line.quantityFulfilled);
+
+        if (quantityToFulfill.lte(0)) {
+          continue;
+        }
+
+        const inventory =
+          await transaction.inventoryBalance.findUnique({
+            where: {
+              warehouseId_productId: {
+                warehouseId: order.warehouseId,
+                productId: line.productId,
+              },
+            },
+          });
+
+        if (!inventory) {
+          throw new SalesOrderServiceError(
+            `Inventory record not found for product ${line.productId}.`,
+            409,
+          );
+        }
+
+        await transaction.inventoryBalance.update({
+          where: {
+            warehouseId_productId: {
+              warehouseId: order.warehouseId,
+              productId: line.productId,
+            },
+          },
+          data: {
+            quantityOnHand: {
+              decrement: quantityToFulfill,
+            },
+          },
+        });
+
+        await transaction.salesOrderLine.update({
+          where: {
+            id: line.id,
+          },
+          data: {
+            quantityFulfilled: {
+              increment: quantityToFulfill,
+            },
+          },
+        });
+
+        await transaction.stockMovement.create({
+          data: {
+            warehouseId: order.warehouseId,
+            productId: line.productId,
+            movementType: 'SALES_ORDER_FULFILMENT',
+            quantityChange: quantityToFulfill.negated(),
+            reference: order.orderNumber,
+            notes: `Stock issued for sales order ${order.orderNumber}.`,
+            createdById,
+            salesOrderId: order.id,
+            salesOrderLineId: line.id,
+          },
+        });
+      }
 
       return transaction.salesOrder.update({
         where: {
