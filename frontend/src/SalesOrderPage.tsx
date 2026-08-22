@@ -6,8 +6,16 @@ type SalesOrder = {
   id: string;
   status: string;
   orderNumber?: string;
-  customerName?: string;
-  totalAmount?: string | number;
+  customer?: {
+    id?: string;
+    name?: string;
+  };
+  warehouseId?: string;
+  lines?: Array<{
+    productId: string;
+    quantityOrdered: string | number;
+    unitPrice: string | number;
+  }>;
 };
 
 type OrderResponse = {
@@ -18,21 +26,33 @@ export default function SalesOrderPage() {
   const [items, setItems] = useState<SalesOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [customerName, setCustomerName] = useState('');
+  const [orderNumber, setOrderNumber] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [warehouseId, setWarehouseId] = useState('');
+  const [productId, setProductId] = useState('');
+  const [quantityOrdered, setQuantityOrdered] = useState('1');
+  const [unitPrice, setUnitPrice] = useState('');
 
   async function load() {
     setLoading(true);
     setError('');
 
     try {
-      const result = await apiGet<OrderResponse>('/api/sales-orders?page=1&pageSize=100');
+      const result = await apiGet<OrderResponse>(
+        '/api/sales-orders?page=1&pageSize=100'
+      );
+
       setItems(result.data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load customer orders.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to load customer orders.'
+      );
     } finally {
       setLoading(false);
     }
@@ -44,33 +64,68 @@ export default function SalesOrderPage() {
 
   async function createOrder(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     setSaving(true);
     setError('');
 
     try {
       await apiPost('/api/sales-orders', {
-        customerId: customerId || undefined,
-        customerName,
+        orderNumber,
+        customerId,
+        warehouseId,
+        lines: [
+          {
+            productId,
+            quantityOrdered,
+            unitPrice,
+          },
+        ],
       });
 
-      setCustomerName('');
+      setOrderNumber('');
       setCustomerId('');
+      setWarehouseId('');
+      setProductId('');
+      setQuantityOrdered('1');
+      setUnitPrice('');
+
       setShowForm(false);
+
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create customer order.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to create customer order.'
+      );
     } finally {
       setSaving(false);
     }
   }
 
-  async function action(id: string, type: 'confirm' | 'fulfill') {
+  async function action(
+    id: string,
+    type: 'confirm' | 'fulfill'
+  ) {
+    setError('');
+
     try {
       await apiPost(`/api/sales-orders/${id}/${type}`);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${type} order.`);
+      setError(
+        err instanceof Error
+          ? err.message
+          : `Failed to ${type} order.`
+      );
     }
+  }
+
+  function closeForm() {
+    if (saving) return;
+
+    setShowForm(false);
+    setError('');
   }
 
   return (
@@ -83,12 +138,24 @@ export default function SalesOrderPage() {
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="module-action secondary" onClick={load}>
-            <RefreshCw size={16} /> Refresh
+          <button
+            className="module-action secondary"
+            onClick={load}
+            disabled={loading}
+          >
+            <RefreshCw size={16} />
+            Refresh
           </button>
 
-          <button className="module-action" onClick={() => setShowForm(true)}>
-            <Plus size={16} /> New Order
+          <button
+            className="module-action"
+            onClick={() => {
+              setError('');
+              setShowForm(true);
+            }}
+          >
+            <Plus size={16} />
+            New Order
           </button>
         </div>
       </div>
@@ -99,12 +166,16 @@ export default function SalesOrderPage() {
         <div className="panel-heading">
           <div>
             <h4>Customer orders</h4>
-            <p>{loading ? 'Loading...' : `${items.length} orders`}</p>
+            <p>
+              {loading ? 'Loading...' : `${items.length} orders`}
+            </p>
           </div>
         </div>
 
         {loading ? (
-          <div className="inventory-empty">Loading...</div>
+          <div className="inventory-empty">
+            Loading...
+          </div>
         ) : items.length === 0 ? (
           <div className="inventory-empty">
             <ShoppingCart size={34} />
@@ -118,31 +189,64 @@ export default function SalesOrderPage() {
                 <tr>
                   <th>Order</th>
                   <th>Customer</th>
-                  <th>Total</th>
+                  <th>Warehouse</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
 
               <tbody>
-                {items.map(item => (
+                {items.map((item) => (
                   <tr key={item.id}>
-                    <td><strong>{item.orderNumber ?? item.id}</strong></td>
-                    <td>{item.customerName ?? '—'}</td>
-                    <td>{item.totalAmount ?? '—'}</td>
-                    <td><strong>{item.status}</strong></td>
-                    <td style={{ display: 'flex', gap: 6 }}>
-                      {item.status === 'DRAFT' && (
-                        <button className="module-action" onClick={() => action(item.id, 'confirm')}>
-                          Confirm
-                        </button>
-                      )}
+                    <td>
+                      <strong>
+                        {item.orderNumber ?? item.id}
+                      </strong>
+                    </td>
 
-                      {item.status === 'CONFIRMED' && (
-                        <button className="module-action" onClick={() => action(item.id, 'fulfill')}>
-                          Fulfill
-                        </button>
-                      )}
+                    <td>
+                      {item.customer?.name ??
+                        item.customer?.id ??
+                        '—'}
+                    </td>
+
+                    <td>
+                      {item.warehouseId ?? '—'}
+                    </td>
+
+                    <td>
+                      <strong>{item.status}</strong>
+                    </td>
+
+                    <td>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 6,
+                        }}
+                      >
+                        {item.status === 'DRAFT' && (
+                          <button
+                            className="module-action"
+                            onClick={() =>
+                              action(item.id, 'confirm')
+                            }
+                          >
+                            Confirm
+                          </button>
+                        )}
+
+                        {item.status === 'CONFIRMED' && (
+                          <button
+                            className="module-action"
+                            onClick={() =>
+                              action(item.id, 'fulfill')
+                            }
+                          >
+                            Fulfill
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -161,21 +265,115 @@ export default function SalesOrderPage() {
                 <p>Create a new sales order.</p>
               </div>
 
-              <button className="modal-close" onClick={() => setShowForm(false)}>×</button>
+              <button
+                className="modal-close"
+                onClick={closeForm}
+                type="button"
+              >
+                ×
+              </button>
             </div>
 
             <form onSubmit={createOrder}>
               <label className="form-label">
-                Customer Name
-                <input className="form-input" value={customerName} onChange={e => setCustomerName(e.target.value)} required />
+                Order Number
+
+                <input
+                  className="form-input"
+                  value={orderNumber}
+                  onChange={(e) =>
+                    setOrderNumber(e.target.value)
+                  }
+                  placeholder="SO-002"
+                  required
+                />
               </label>
 
               <label className="form-label">
                 Customer ID
-                <input className="form-input" value={customerId} onChange={e => setCustomerId(e.target.value)} placeholder="Optional" />
+
+                <input
+                  className="form-input"
+                  value={customerId}
+                  onChange={(e) =>
+                    setCustomerId(e.target.value)
+                  }
+                  placeholder="Enter customer ID"
+                  required
+                />
               </label>
 
-              <button className="module-action" type="submit" disabled={saving}>
+              <label className="form-label">
+                Warehouse ID
+
+                <input
+                  className="form-input"
+                  value={warehouseId}
+                  onChange={(e) =>
+                    setWarehouseId(e.target.value)
+                  }
+                  placeholder="Enter warehouse ID"
+                  required
+                />
+              </label>
+
+              <label className="form-label">
+                Product ID
+
+                <input
+                  className="form-input"
+                  value={productId}
+                  onChange={(e) =>
+                    setProductId(e.target.value)
+                  }
+                  placeholder="Enter product ID"
+                  required
+                />
+              </label>
+
+              <label className="form-label">
+                Quantity
+
+                <input
+                  className="form-input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={quantityOrdered}
+                  onChange={(e) =>
+                    setQuantityOrdered(e.target.value)
+                  }
+                  required
+                />
+              </label>
+
+              <label className="form-label">
+                Unit Price
+
+                <input
+                  className="form-input"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={unitPrice}
+                  onChange={(e) =>
+                    setUnitPrice(e.target.value)
+                  }
+                  placeholder="100"
+                  required
+                />
+              </label>
+
+              <button
+                className="module-action"
+                type="submit"
+                disabled={saving}
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  marginTop: 10,
+                }}
+              >
                 {saving ? 'Creating...' : 'Create Order'}
               </button>
             </form>

@@ -4,8 +4,9 @@ import InventoryPage from './InventoryPage';
 import WarehousePage from './WarehousePage';
 import {
   TransfersPage,
-  CustomerOrdersPage,
 } from './OperationsListPage';
+
+import SalesOrderPage from './SalesOrderPage';
 import WorkOrdersPage from './WorkOrdersPage';
 
 import {
@@ -320,11 +321,10 @@ export default function App() {
               <TransfersPage />
             )}
 
-          {/* CUSTOMER ORDERS */}
           {activePage === 'orders' &&
-            canAccessPage(role, 'orders') && (
-              <CustomerOrdersPage />
-            )}
+  canAccessPage(role, 'orders') && (
+    <SalesOrderPage />
+)}
 
         </section>
       </main>

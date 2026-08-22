@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState } from 'react';
 import { Plus, RefreshCw, ShoppingCart } from 'lucide-react';
 import { apiGet, apiPost } from './api';
+import { useNavigate } from 'react-router-dom';
 
 type Order = {
   id: string;
@@ -13,7 +14,7 @@ export default function CustomerOrderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
-
+const navigate = useNavigate();
   const [customerId, setCustomerId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [saving, setSaving] = useState(false);
@@ -137,7 +138,23 @@ export default function CustomerOrderPage() {
                 ×
               </button>
             </div>
+<div style={{ display: 'flex', gap: '10px' }}>
+  <button
+    className="module-action"
+    onClick={() => navigate('/sales-orders/new')}
+  >
+    + Create Order
+  </button>
 
+  <button
+    className="module-action secondary"
+    onClick={load}
+    disabled={loading}
+  >
+    <RefreshCw size={16} />
+    Refresh
+  </button>
+</div>
             <form onSubmit={createOrder}>
               <label className="form-label">
                 Customer ID
